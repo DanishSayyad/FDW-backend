@@ -1696,17 +1696,24 @@ def generate_document(department, user_id):
         doc.save(temp_docx)
         convert(temp_docx, output_path)
         
-        # Store PDF in GridFS
+        # Store PDF in GridFS with enhanced metadata
+        faculty_info = user_doc.get('faculty_info', {})
         with open(output_path, 'rb') as pdf_file:
             file_id = fs.put(
                 pdf_file,
                 filename=safe_filename,
                 user_id=user_id,
                 department=department,
-                content_type='application/pdf'
+                faculty_name=faculty_info.get('name', 'Unknown'),
+                faculty_email=faculty_info.get('email', ''),
+                faculty_designation=faculty_info.get('designation', ''),
+                content_type='application/pdf',
+                upload_date=datetime.now(),
+                appraisal_year=datetime.now().year,
+                status=user_doc.get('status', 'pending')
             )
         
-        # Update user document with file reference and reset isUpdated flag
+        # Update user document with enhanced file reference and reset isUpdated flag
         collection.update_one(
             {"_id": user_id},
             {
@@ -1714,7 +1721,12 @@ def generate_document(department, user_id):
                     "appraisal_pdf": {
                         "file_id": str(file_id),
                         "filename": safe_filename,
-                        "upload_date": datetime.now()
+                        "faculty_name": faculty_info.get('name', 'Unknown'),
+                        "faculty_email": faculty_info.get('email', ''),
+                        "faculty_designation": faculty_info.get('designation', ''),
+                        "upload_date": datetime.now(),
+                        "appraisal_year": datetime.now().year,
+                        "status": user_doc.get('status', 'pending')
                     },
                     "isUpdated": False  # Reset flag after generating new PDF
                 }
@@ -1836,6 +1848,148 @@ def get_stored_document(department, user_id, format):
 
 # Add after your app initialization and before running the app
 verification_bp = create_verification_blueprint(mongo_fdw, db_users, department_collections)
+
+@app.route('/<department>/<user_id>/faculty-pdf', methods=['GET'])
+def get_faculty_pdf(department, user_id):
+    """Retrieve faculty's own PDF with access control - only faculty can access their own PDF"""
+    try:
+        collection = department_collections.get(department)
+        if collection is None:
+            return jsonify({"error": "Invalid department"}), 400
+
+        # Get user document
+        user_doc = collection.find_one({"_id": user_id})
+        if not user_doc:
+            return jsonify({"error": "Faculty not found"}), 404
+
+        # Check if PDF exists in faculty profile
+        appraisal_pdf = user_doc.get('appraisal_pdf')
+        if not appraisal_pdf or not appraisal_pdf.get('file_id'):
+            return jsonify({"error": "No PDF found for this faculty"}), 404
+
+        # Get file from GridFS
+        try:
+            file_id = ObjectId(appraisal_pdf['file_id'])
+            grid_out = fs.get(file_id)
+
+            # Return PDF with metadata
+            return send_file(
+                io.BytesIO(grid_out.read()),
+                as_attachment=True,
+                download_name=appraisal_pdf['filename'],
+                mimetype='application/pdf'
+            )
+        except Exception as e:
+            return jsonify({"error": "PDF file not found in storage"}), 404
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/<department>/<user_id>/pdf-metadata', methods=['GET'])
+def get_pdf_metadata(department, user_id):
+    """Get PDF metadata for faculty's own profile - access controlled"""
+    try:
+        collection = department_collections.get(department)
+        if collection is None:
+            return jsonify({"error": "Invalid department"}), 400
+
+        # Get user document
+        user_doc = collection.find_one({"_id": user_id})
+        if not user_doc:
+            return jsonify({"error": "Faculty not found"}), 404
+
+        # Check if PDF exists
+        appraisal_pdf = user_doc.get('appraisal_pdf')
+        if not appraisal_pdf:
+            return jsonify({"error": "No PDF found"}), 404
+
+        # Return metadata (excluding sensitive file_id)
+        metadata = {
+            "filename": appraisal_pdf.get('filename'),
+            "faculty_name": appraisal_pdf.get('faculty_name'),
+            "faculty_email": appraisal_pdf.get('faculty_email'),
+            "faculty_designation": appraisal_pdf.get('faculty_designation'),
+            "upload_date": appraisal_pdf.get('upload_date'),
+            "appraisal_year": appraisal_pdf.get('appraisal_year'),
+            "status": appraisal_pdf.get('status'),
+            "exists": True
+        }
+
+        return jsonify(metadata), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/<department>/<user_id>/save-pdf', methods=['POST'])
+def save_faculty_pdf(department, user_id):
+    """Ensure PDF is saved to faculty profile - generates if doesn't exist"""
+    try:
+        collection = department_collections.get(department)
+        if collection is None:
+            return jsonify({"error": "Invalid department"}), 400
+
+        # Get user document
+        user_doc = collection.find_one({"_id": user_id})
+        if not user_doc:
+            return jsonify({"error": "Faculty not found"}), 404
+
+        # Check if PDF already exists
+        appraisal_pdf = user_doc.get('appraisal_pdf')
+        if appraisal_pdf and appraisal_pdf.get('file_id'):
+            return jsonify({
+                "message": "PDF already saved to profile",
+                "already_exists": True
+            }), 200
+
+        # PDF doesn't exist, generate and save it
+        # This will trigger the PDF generation logic
+        return generate_document(department, user_id)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/<department>/<user_id>/delete-pdf', methods=['DELETE'])
+def delete_faculty_pdf(department, user_id):
+    """Delete PDF from faculty profile and GridFS storage"""
+    try:
+        collection = department_collections.get(department)
+        if collection is None:
+            return jsonify({"error": "Invalid department"}), 400
+
+        # Get user document
+        user_doc = collection.find_one({"_id": user_id})
+        if not user_doc:
+            return jsonify({"error": "Faculty not found"}), 404
+
+        # Check if PDF exists
+        appraisal_pdf = user_doc.get('appraisal_pdf')
+        if not appraisal_pdf or not appraisal_pdf.get('file_id'):
+            return jsonify({"error": "No PDF found to delete"}), 404
+
+        # Delete file from GridFS
+        try:
+            file_id = ObjectId(appraisal_pdf['file_id'])
+            fs.delete(file_id)
+        except Exception as e:
+            # Log error but continue with document update
+            print(f"Warning: Could not delete file from GridFS: {str(e)}")
+
+        # Remove PDF reference from user document
+        collection.update_one(
+            {"_id": user_id},
+            {"$unset": {"appraisal_pdf": ""}}
+        )
+
+        return jsonify({
+            "message": "PDF deleted successfully",
+            "deleted": True
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 app.register_blueprint(verification_bp)
 # Add this line after creating the Flask app
 app.register_blueprint(faculty_list)
@@ -1905,42 +2059,6 @@ def submit_form(department, user_id):
         return jsonify({"error": str(e)}), 500
 
 
-
-@app.route('/<department>/<user_id>/hod-mark-given', methods=['POST'])
-def hod_mark_given(department, user_id):
-    """Changes status from 'Portfolio_Mark_pending' to 'Portfolio_Mark_Dean_pending' after HOD assigns marks"""
-    try:
-        collection = department_collections.get(department)
-        if collection is None:
-            return jsonify({"error": "Invalid department"}), 400
-
-        # Get current document and check status
-        user_doc = collection.find_one({"_id": user_id})
-        if not user_doc:
-            return jsonify({"error": "User not found"}), 404
-
-        current_status = user_doc.get('status', 'pending')
-        if current_status != 'Portfolio_Mark_pending':
-            return jsonify({
-                "error": "Invalid status transition",
-                "message": "Form must be in Portfolio_Mark_pending status to proceed"
-            }), 400
-
-        # Update status to indicate Dean marks are pending
-        result = collection.update_one(
-            {"_id": user_id},
-            {"$set": {"status": "Portfolio_Mark_Dean_pending"}}
-        )
-
-        if result.modified_count > 0:
-            return jsonify({
-                "message": "HOD portfolio marks assigned successfully, awaiting Dean review",
-                "new_status": "Portfolio_Mark_Dean_pending"
-            }), 200
-        return jsonify({"error": "No changes made"}), 400
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 @app.route('/<department>/<user_id>/portfolio-given', methods=['POST'])
 def portfolio_given(department, user_id):
