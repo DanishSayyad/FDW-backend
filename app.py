@@ -76,7 +76,7 @@ def health_check():
 @app.route('/users', methods=['POST'])
 def add_user():
     data = request.json
-    required_fields = ["_id", "name", "role", "dept", "mail", "mob"]
+    required_fields = ["_id", "name", "role", "dept", "mail", "mob", "year", "date_added"]
 
     if not data or not all(k in data for k in required_fields):
         return jsonify({"error": "Missing required fields"}), 400
