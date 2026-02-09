@@ -204,10 +204,15 @@ def create_external(department):
         # Generate unique external ID
         external_id = generate_external_id(collection, department)
 
+        # Check if user already exists
+        if db_users.find_one({"_id": external_id}) or db_signin.find_one({"_id": external_id}):
+            return jsonify({"error": "User with this ID already exists"}), 400
+
         # Create external reviewer document
         external_doc = {
             "_id": external_id,
             "full_name": data['full_name'],
+            "name": data['full_name'],  # Add name field for compatibility
             "mail": data['mail'],
             "mob": data['mob'],
             "desg": data['desg'],
@@ -221,7 +226,12 @@ def create_external(department):
         # Add to signin collection with password same as ID
         salt = bcrypt.gensalt()
         hashed_password = bcrypt.hashpw(external_id.encode('utf-8'), salt)
-        db_signin.insert_one({"_id": external_id, "password": hashed_password})
+        
+        try:
+            db_signin.insert_one({"_id": external_id, "password": hashed_password})
+        except Exception as e:
+            print(f"Error inserting into db_signin: {str(e)}")
+            return jsonify({"error": "Failed to create user credentials"}), 500
 
         # Add to db_users collection
         user_doc = {
@@ -230,7 +240,14 @@ def create_external(department):
             "isExternal": True,  # Add isExternal flag
             "facultyToReview": []  # Initialize empty list for faculty assignments
         }
-        db_users.insert_one(user_doc)
+        
+        try:
+            db_users.insert_one(user_doc)
+        except Exception as e:
+            # Rollback: Remove from db_signin if db_users fails
+            db_signin.delete_one({"_id": external_id})
+            print(f"Error inserting into db_users: {str(e)}")
+            return jsonify({"error": "Failed to create user profile"}), 500
 
         # Update or create externals document in department collection
         result = collection.update_one(
@@ -287,10 +304,15 @@ def create_college_external():
         # Generate unique external ID
         external_id = generate_external_id(collection, 'PCCoE')
 
+        # Check if user already exists
+        if db_users.find_one({"_id": external_id}) or db_signin.find_one({"_id": external_id}):
+            return jsonify({"error": "User with this ID already exists"}), 400
+
         # Create external reviewer document
         external_doc = {
             "_id": external_id,
             "full_name": data['full_name'],
+            "name": data['full_name'],  # Add name field for compatibility
             "mail": data['mail'],
             "mob": data['mob'],
             "desg": data['desg'],
@@ -303,7 +325,12 @@ def create_college_external():
         # Add to signin collection with password same as ID
         salt = bcrypt.gensalt()
         hashed_password = bcrypt.hashpw(external_id.encode('utf-8'), salt)
-        db_signin.insert_one({"_id": external_id, "password": hashed_password})
+        
+        try:
+            db_signin.insert_one({"_id": external_id, "password": hashed_password})
+        except Exception as e:
+            print(f"Error inserting into db_signin: {str(e)}")
+            return jsonify({"error": "Failed to create user credentials"}), 500
 
         # Add to db_users collection
         user_doc = {
@@ -312,7 +339,14 @@ def create_college_external():
             "isExternal": True,  # Add isExternal flag
             "facultyToReview": []  # Initialize empty list for faculty assignments
         }
-        db_users.insert_one(user_doc)
+        
+        try:
+            db_users.insert_one(user_doc)
+        except Exception as e:
+            # Rollback: Remove from db_signin if db_users fails
+            db_signin.delete_one({"_id": external_id})
+            print(f"Error inserting into db_users: {str(e)}")
+            return jsonify({"error": "Failed to create user profile"}), 500
 
         # Update or create externals document in department collection
         result = collection.update_one(

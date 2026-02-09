@@ -487,38 +487,38 @@ def login():
         
         if bcrypt.checkpw(data["password"].encode('utf-8'), stored_password):
             user_data = db_users.find_one({"_id": data["_id"]})
-        if not user_data:
-            return jsonify({"error": "User data not found"}), 404
+            if not user_data:
+                return jsonify({"error": "User data not found"}), 404
 
-        # Create response data based on user type
-        response_data = {
-            "_id": user_data["_id"],
-            "name": user_data.get("full_name") if user_data.get("isExternal") else user_data.get("name"),
-            "role": user_data.get("role"),
-            "dept": user_data.get("dept"),
-            "isExternal": user_data.get("isExternal", False),
-            "mail": user_data.get("mail"),
-            "desg": user_data.get("desg", "Faculty"),
-            "isAddedForInteraction" : user_data.get("isAddedForInteraction", False),
-            "interactionDepartments" : user_data.get("interactionDepartments", []),
-        }
-
-        # Add external-specific fields if user is external
-        if user_data.get("isExternal"):
-            response_data.update({
-                "specialization": user_data.get("specialization"),
-                "organization": user_data.get("organization"),
-                "facultyToReview": user_data.get("facultyToReview", []),
-                "mob": user_data.get("mob"),
-            })
-        else:
-            # Add regular faculty fields
-            response_data.update({
+            # Create response data based on user type
+            response_data = {
+                "_id": user_data["_id"],
+                "name": user_data.get("full_name") if user_data.get("isExternal") else user_data.get("name"),
+                "role": user_data.get("role"),
+                "dept": user_data.get("dept"),
+                "isExternal": user_data.get("isExternal", False),
                 "mail": user_data.get("mail"),
-                "mob": user_data.get("mob"),
-                "isInVerificationPanel": user_data.get("isInVerificationPanel", False),
-                "facultyToVerify": user_data.get("facultyToVerify", {})
-            })
+                "desg": user_data.get("desg", "Faculty"),
+                "isAddedForInteraction" : user_data.get("isAddedForInteraction", False),
+                "interactionDepartments" : user_data.get("interactionDepartments", []),
+            }
+
+            # Add external-specific fields if user is external
+            if user_data.get("isExternal"):
+                response_data.update({
+                    "specialization": user_data.get("specialization"),
+                    "organization": user_data.get("organization"),
+                    "facultyToReview": user_data.get("facultyToReview", []),
+                    "mob": user_data.get("mob"),
+                })
+            else:
+                # Add regular faculty fields
+                response_data.update({
+                    "mail": user_data.get("mail"),
+                    "mob": user_data.get("mob"),
+                    "isInVerificationPanel": user_data.get("isInVerificationPanel", False),
+                    "facultyToVerify": user_data.get("facultyToVerify", {})
+                })
 
             response = app.response_class(
                 response=dumps(response_data),
